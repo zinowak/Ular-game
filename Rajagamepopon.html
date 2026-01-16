@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Block Blast Ultimate Popon 👑</title>
+    <style>
+        :root { --bg: #0f172a; --board: #1e293b; --accent: #fbbf24; --danger: #ff4757; }
+        body { margin: 0; background: var(--bg); color: white; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow: hidden; touch-action: none; }
+        
+        .header { text-align: center; padding: 20px; }
+        .score-box { font-size: 3.5rem; font-weight: 900; color: white; text-shadow: 0 0 20px rgba(255,255,255,0.2); }
+
+        #grid { 
+            display: grid; 
+            grid-template-columns: repeat(8, 45px); 
+            grid-template-rows: repeat(8, 45px); 
+            gap: 4px; 
+            background: var(--board); 
+            padding: 12px; 
+            border-radius: 15px; 
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .cell { width: 45px; height: 45px; background: rgba(255,255,255,0.03); border-radius: 8px; transition: background 0.2s; }
+
+        #piece-container { 
+            display: flex; 
+            justify-content: space-around; 
+            align-items: center;
+            width: 100%; 
+            max-width: 420px; 
+            margin-top: 50px; 
+            height: 140px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+        }
+        
+        .piece { position: relative; display: grid; gap: 3px; cursor: grab; transition: transform 0.2s; }
+        .p-cell { width: 22px; height: 22px; border-radius: 5px; pointer-events: none; }
+
+        /* Pop Up Anpalibebel */
+        #unbelievable { 
+            position: fixed; top: 35%; font-size: 3.5rem; font-weight: 900; 
+            color: var(--accent); display: none; z-index: 2000; 
+            text-shadow: 0 0 30px var(--accent); animation: animPop 0.8s ease-out;
+        }
+
+        /* Layar Kalah */
+        .overlay { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.9); display: none; flex-direction: column; 
+            align-items: center; justify-content: center; z-index: 3000; 
+        }
+
+        .btn-restart { 
+            margin-top: 20px; padding: 15px 45px; border-radius: 50px; border: none; 
+            background: #00f2fe; font-weight: bold; font-size: 1.2rem; cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0,242,254,0.4);
+        }
+
+        @keyframes animPop { 0% { transform: scale(0); opacity: 0; } 70% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(1); opacity: 0; } }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="score-box" id="score">0</div>
+    </div>
+
+    <div id="grid"></div>
+    <div id="unbelievable">ANPALIBEBEL!</div>
+    
+    <div id="piece-container"></div>
+
+    <div id="gameOverScreen" class="overlay">
+        <h2 style="font-size: 3.5rem; color: var(--danger); margin-bottom: 0;">YAH KALAH!</h2>
+        <p style="font-size: 1.5rem; opacity: 0.8;">Skor Lo: <span id="finalScore">0</span></p>
+        <button class="btn-restart" onclick="location.reload()">COBA LAGI</button>
+    </div>
+
+    <audio id="bgMusic" loop>
+        <source src="http://googleusercontent.com/file_content/0" type="audio/ogg">
+    </audio>
+
+    <script>
+        const gridEl = document.getElementById('grid');
+        const pieceContainer = document.getElementById('piece-container');
+        const scoreEl = document.getElementById('score');
+        const unabelEl = document.getElementById('unbelievable');
+        const bgMusic = document.getElementById('bgMusic');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+
+        let score = 0;
+        let board = Array(64).fill(null);
+        let piecesLeft = 0;
+
+        const shapes = [
+            { s: [[0,0], [0,1], [1,0], [1,1]], c: '#ff4757' }, // Kotak
+            { s: [[0,0], [0,1], [0,2], [0,3]], c: '#2ecc71' }, // Panjang
+            { s: [[0,0], [1,0], [2,0]],        c: '#3498db' }, // Lurus
+            { s: [[0,0], [1,0], [1,1]],        c: '#f1c40f' }, // L
+            { s: [[0,0], [0,1], [1,1], [1,2]], c: '#9b59b6' }  // Z
+        ];
+
+        function playSound(freq, duration, type='sine') {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = type;
+            o.frequency.setValueAtTime(freq, ctx.currentTime);
+            g.gain.setValueAtTime(0.1, ctx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
+            o.connect(g); g.connect(ctx.destination);
+            o.start(); o.stop(ctx.currentTime + duration);
+        }
+
+        function speak(text) {
+            const msg = new SpeechSynthesisUtterance(text);
+            msg.pitch = 0.6; msg.rate = 0.8;
+            window.speechSynthesis.speak(msg);
+        }
+
+        function init() {
+            gridEl.innerHTML = '';
+            for(let i=0; i<64; i++) {
+                const c = document.createElement('div');
+                c.className = 'cell';
+                gridEl.appendChild(c);
+            }
+            spawnPieces();
+            document.addEventListener('pointerdown', () => bgMusic.play().catch(()=>{}), {once:true});
+        }
+
+        function spawnPieces() {
+            pieceContainer.innerHTML = '';
+            piecesLeft = 3;
+            for(let i=0; i<3; i++) createPiece();
+            checkGameOver();
+        }
+
+        function createPiece() {
+            const data = shapes[Math.floor(Math.random()*shapes.length)];
+            const p = document.createElement('div');
+            p.className = 'piece';
+            
+            const r = Math.max(...data.s.map(s => s[0]))+1;
+            const c = Math.max(...data.s.map(s => s[1]))+1;
+            p.style.gridTemplateRows = `repeat(${r}, 22px)`;
+            p.style.gridTemplateColumns = `repeat(${c}, 22px)`;
+
+            data.s.forEach(s => {
+                const sc = document.createElement('div');
+                sc.className = 'p-cell';
+                sc.style.backgroundColor = data.c;
+                sc.style.gridRowStart = s[0]+1; sc.style.gridColumnStart = s[1]+1;
+                p.appendChild(sc);
+            });
+
+            handleDrag(p, data);
+            pieceContainer.appendChild(p);
+        }
+
+        function handleDrag(el, data) {
+            let offsetX, offsetY;
+            
+            el.onpointerdown = (e) => {
+                el.setPointerCapture(e.pointerId);
+                const rect = el.getBoundingClientRect();
+                offsetX = e.clientX - rect.left;
+                offsetY = e.clientY - rect.top;
+                el.style.zIndex = "2000";
+            };
+
+            el.onpointermove = (e) => {
+                if (e.buttons !== 1) return;
+                // Membesarkan balok agar pas dengan grid saat di-drag
+                el.querySelectorAll('.p-cell').forEach(c => { c.style.width = '45px'; c.style.height = '45px'; });
+                el.style.gridTemplateRows = `repeat(4, 45px)`;
+                el.style.gridTemplateColumns = `repeat(4, 45px)`;
+
+                el.style.position = 'fixed';
+                // Offset agar balok berada tepat di atas jari/kursor
+                el.style.left = (e.clientX - offsetX) + 'px';
+                el.style.top = (e.clientY - offsetY - 60) + 'px'; 
+            };
+
+            el.onpointerup = (e) => {
+                const rect = gridEl.getBoundingClientRect();
+                // Hitung posisi drop yang presisi
+                const x = (e.clientX - offsetX) - rect.left;
+                const y = (e.clientY - offsetY - 60) - rect.top;
+                
+                const col = Math.round(x / 49);
+                const row = Math.round(y / 49);
+
+                if (tryPlace(data, row, col)) {
+                    playSound(300, 0.1); 
+                    el.remove();
+                    piecesLeft--;
+                    if (piecesLeft === 0) spawnPieces();
+                    checkBlast();
+                } else {
+                    // Reset posisi jika gagal
+                    el.style.position = 'relative';
+                    el.style.left = '0'; el.style.top = '0';
+                    el.querySelectorAll('.p-cell').forEach(c => { c.style.width = '22px'; c.style.height = '22px'; });
+                    el.style.gridTemplateRows = `repeat(4, 22px)`;
+                    el.style.gridTemplateColumns = `repeat(4, 22px)`;
+                }
+            };
+        }
+
+        function tryPlace(data, r, c) {
+            if (data.s.every(s => {
+                let nr = r + s[0], nc = c + s[1];
+                return nr >= 0 && nr < 8 && nc >= 0 && nc < 8 && !board[nr*8+nc];
+            })) {
+                data.s.forEach(s => {
+                    const idx = (r+s[0])*8 + (c+s[1]);
+                    board[idx] = data.c;
+                    gridEl.children[idx].style.backgroundColor = data.c;
+                });
+                return true;
+            }
+            return false;
+        }
+
+        function checkBlast() {
+            let rows = [], cols = [];
+            for(let i=0; i<8; i++) {
+                if(board.slice(i*8, (i+1)*8).every(v => v !== null)) rows.push(i);
+                let colFull = true;
+                for(let j=0; j<8; j++) if(board[j*8+i] === null) colFull = false;
+                if(colFull) cols.push(i);
+            }
+
+            if(rows.length > 0 || cols.length > 0) {
+                playSound(150, 0.3, 'square'); // Suara ledakan
+                rows.forEach(r => { for(let j=0; j<8; j++) clearCell(r*8+j); });
+                cols.forEach(c => { for(let j=0; j<8; j++) clearCell(j*8+c); });
+                score += (rows.length + cols.length) * 100;
+                scoreEl.innerText = score;
+
+                if(board.every(v => v === null)) {
+                    unabelEl.style.display = 'block'; speak("Unbelievable");
+                    setTimeout(() => unabelEl.style.display = 'none', 2000);
+                    score += 1000;
+                }
+            }
+            checkGameOver();
+        }
+
+        function clearCell(idx) {
+            board[idx] = null;
+            gridEl.children[idx].style.backgroundColor = 'rgba(255,255,255,0.03)';
+        }
+
+        function checkGameOver() {
+            const pieces = [...pieceContainer.children];
+            if (pieces.length === 0) return;
+
+            let possible = false;
+            // Cek satu-satu balok yang ada di bawah
+            for (let p of pieces) {
+                // Simulasi data shape
+                const shapeData = shapes.find(sh => sh.c === p.querySelector('.p-cell').style.backgroundColor);
+                if (!shapeData) continue;
+
+                for(let i=0; i<64; i++) {
+                    let r = Math.floor(i/8), c = i%8;
+                    if(shapeData.s.every(s => {
+                        let nr = r+s[0], nc = c+s[1];
+                        return nr < 8 && nc < 8 && !board[nr*8+nc];
+                    })) { possible = true; break; }
+                }
+                if(possible) break;
+            }
+
+            if(!possible) {
+                document.getElementById('finalScore').innerText = score;
+                gameOverScreen.style.display = 'flex';
+                speak("Game Over");
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
